@@ -1,112 +1,89 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/wait.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
+#include <signal.h>
+#include <string.h>
 
-#define CHANNEL_KEY 1234
-#define SYNC_KEY 5678
-
-struct data {
-    int id;
-    char message[100];
-};
-
-struct msgbuf {
-    long mtype;
-    struct data mdata;
-};
+#define PROCESS_ID_SIZE 4
+#define MESSAGE_SIZE 40
 
 int main() {
-    // Create the message queue
-    int channel_id = msgget(CHANNEL_KEY, IPC_CREAT | 0666);
-    int sync_id = msgget(SYNC_KEY, IPC_CREAT | 0666);
+    int fd[2];
+    pid_t p1, p2, p3;
+    char process_id[PROCESS_ID_SIZE];
+    char message[MESSAGE_SIZE];
 
-    // Create process P1
-    pid_t p1 = fork();
+    // Создание информационного канала
+    if (pipe(fd) == -1) {
+        perror("pipe");
+        exit(EXIT_FAILURE);
+    }
+
+    p1 = fork();
 
     if (p1 < 0) {
-        perror("Fork failed");
-        return 1;
+        perror("fork");
+        exit(EXIT_FAILURE);
     }
     else if (p1 == 0) {
-        // P1 process
-        // Prepare data
-        struct data d1 = { 1, "Data from process P1" };
+        // Процесс P1
+        p3 = fork();
 
-        // Send data to channel K1
-        struct msgbuf buf1 = { 1, d1 };
-        msgsnd(channel_id, &buf1, sizeof(struct data), 0);
-
-        // Inform main process about data sent
-        printf("Process P1: Data sent to channel K1\n");
-
-        // Send PID of process P3 to process P2 through sync channel K0
-        int p3_pid = getpid();
-        struct msgbuf buf_sync = { 1, {p3_pid, ""} };
-        msgsnd(sync_id, &buf_sync, sizeof(int), 0);
-
-        printf("Process P1: PID of P3 sent to process P2\n");
-
-        // Wait for P3 to finish
-        wait(NULL);
-
-    }
-    else {
-        // Create process P2
-        pid_t p2 = fork();
-
-        if (p2 < 0) {
-            perror("Fork failed");
-            return 1;
+        if (p3 < 0) {
+            perror("fork");
+            exit(EXIT_FAILURE);
         }
-        else if (p2 == 0) {
-            // P2 process
-            // Receive PID of process P3 from P1 through sync channel K0
-            struct msgbuf buf_sync;
-            msgrcv(sync_id, &buf_sync, sizeof(int), 1, 0);
-            int p3_pid = buf_sync.mdata.id;
-
-            printf("Process P2: Received PID of P3 from process P1: %d\n", p3_pid);
-
-            // Send signal to process P3
-            kill(p3_pid, SIGUSR1);
+        else if (p3 == 0) {
+            // Процесс P3
+            // Подготовка данных в канал
+            // Посылка сигнала в P1
+            // Ожидание сигнала
+            // Подготовка данных в канал
+            exit(EXIT_SUCCESS);
         }
         else {
-            // Create process P3
-            pid_t p3 = fork();
+            // Процесс P1
+            // Ожидание сигнала подготовки данных в канал
+            // Передача в канал синхронизации K0
+            // Идентификация P3
+            // Ожидание завершения P3
+            close(fd[0]);
+            strcpy(process_id, "P3");
+            write(fd[1], process_id, PROCESS_ID_SIZE);
+            close(fd[1]);
+            wait(NULL);
+            exit(EXIT_SUCCESS);
+        }
+    }
+    else {
+        // Процесс Po
+        p2 = fork();
 
-            if (p3 < 0) {
-                perror("Fork failed");
-                return 1;
-            }
-            else if (p3 == 0) {
-                // P3 process
-                // Prepare data
-                struct data d3 = { 3, "Data from process P3" };
-
-                // Send data to channel K1
-                struct msgbuf buf3 = { 1, d3 };
-                msgsnd(channel_id, &buf3, sizeof(struct data), 0);
-
-                // Inform main process about data sent
-                printf("Process P3: Data sent to channel K1\n");
-            }
-            else {
-                // Main process
-                // Process data from channels
-                struct msgbuf buf;
-                while (msgrcv(channel_id, &buf, sizeof(struct data), 1, IPC_NOWAIT) != -1) {
-                    printf("Main Process: Received data from channel K1 - ID: %d, Message: %s\n", buf.mdata.id, buf.mdata.message);
-                }
-
-                // Cleanup message queues
-                msgctl(channel_id, IPC_RMID, NULL);
-                msgctl(sync_id, IPC_RMID, NULL);
-
-                printf("Main Process: Finished processing\n");
-            }
+        if (p2 < 0) {
+            perror("fork");
+            exit(EXIT_FAILURE);
+        }
+        else if (p2 == 0) {
+            // Процесс P2
+            // Опрос канала синхронизации
+            // Подготовка данных в канал
+            // Посылка сигнала
+            close(fd[1]);
+            read(fd[0], process_id, PROCESS_ID_SIZE);
+            close(fd[0]);
+            kill(atoi(process_id), SIGUSR1);
+            exit(EXIT_SUCCESS);
+        }
+        else {
+            // Процесс Po
+            // Обработка данных из канала
+            close(fd[1]);
+            read(fd[0], message, MESSAGE_SIZE);
+            printf("Received message: %s\n", message);
+            close(fd[0]);
+            wait(NULL);
+            exit(EXIT_SUCCESS);
         }
     }
 
